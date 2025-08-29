@@ -10,4 +10,7 @@ library ModuleNames {
     bytes32 public constant ROLE_ACCESS_HASH = keccak256(bytes(ROLE_ACCESS));
     bytes32 public constant PROJECT_MANAGER_HASH = keccak256(bytes(PROJECT_MANAGER));
     bytes32 public constant RUND_MANAGER_HASH = keccak256(bytes(FUND_MANAGER));
+
+    uint96 internal constant MIN_DONATION = 0;
+    uint256 internal constant BUFFER_TIME = 900;
 }

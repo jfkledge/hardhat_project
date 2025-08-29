@@ -51,10 +51,23 @@ contract FundManager is ModuleBase {
     function donate(uint64 projectId) external payable {
         bytes memory data = callModuleView(
             ModuleNames.PROJECT_MANAGER_HASH,
-            'beforeDonateHook(uint64)',
+            'getProjectDetail(uint64)',
             abi.encode(projectId)
         );
-        (uint96 msgValue, uint64 nowTimestamp) = abi.decode(data, (uint96, uint64));
+        Project memory project = abi.decode(data, (Project));
+        uint64 nowTimestamp = uint64(block.timestamp);
+        if (nowTimestamp + ModuleNames.BUFFER_TIME > project.deadline)
+            revert ProjectDeadlinePassed();
+        if (msg.value > type(uint96).max) revert ValueTooLarge();
+        uint96 msgValue = uint96(msg.value);
+        if (msgValue == ModuleNames.MIN_DONATION) revert DonationTooSmall();
+        // update project amountRaised
+        callModuleView(
+            ModuleNames.PROJECT_MANAGER_HASH,
+            'setProjectAmountRaised(uint64,uint96)',
+            abi.encode(projectId, msgValue)
+        );
+
         contributions[projectId][msg.sender] += msgValue;
         //add every user donate record
         userDonations[msg.sender].push(
@@ -80,10 +93,18 @@ contract FundManager is ModuleBase {
     ) external nonReentrant onlyProjectOwner(projectId, PermissionType.Withdraw) {
         bytes memory data = callModuleView(
             ModuleNames.PROJECT_MANAGER_HASH,
-            'beforeClaimFundsHook(uint64)',
+            'getProjectDetail(uint64)',
             abi.encode(projectId)
         );
-        uint96 amount = abi.decode(data, (uint96));
+        Project memory project = abi.decode(data, (Project));
+        if (project.amountRaised == ModuleNames.MIN_DONATION) revert NoFundsToClaim();
+        uint96 amount = project.amountRaised;
+        //clean project amountRaised
+        callModuleView(
+            ModuleNames.PROJECT_MANAGER_HASH,
+            'clearProjectAmoutRaised(uint64)',
+            abi.encode(projectId)
+        );
         (bool successful, ) = payable(msg.sender).call{ value: amount }('');
         if (!successful) revert ClaimFailed();
         emit ProjectClaimFunds(projectId, msg.sender, amount);
@@ -93,11 +114,15 @@ contract FundManager is ModuleBase {
      * refund by projectId
      */
     function refund(uint64 projectId) external nonReentrant {
-        callModuleView(
+        bytes memory data = callModuleView(
             ModuleNames.PROJECT_MANAGER_HASH,
-            'beforeRefundHook(uint64)',
+            'getProjectDetail(uint64)',
             abi.encode(projectId)
         );
+        Project memory project = abi.decode(data, (Project));
+        if (project.status != ProjectStatus.Failed) {
+            revert NotInStatus(ProjectStatus.Failed, project.status);
+        }
         uint96 amount = contributions[projectId][msg.sender];
         if (amount == MIN_DONATION) revert NoDonationToRefund();
         contributions[projectId][msg.sender] = MIN_DONATION;

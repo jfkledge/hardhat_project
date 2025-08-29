@@ -29,4 +29,4 @@ const deployProjectManager: DeployFunction = async function (hre: HardhatRuntime
 };
 
 export default deployProjectManager;
-deployProjectManager.tags = ['DeFundMe'];
+deployProjectManager.tags = ['projectmanager'];

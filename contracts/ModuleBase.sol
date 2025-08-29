@@ -6,6 +6,7 @@ import 'hardhat/console.sol';
 import '@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol';
 import '@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol';
 import '@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol';
+import '@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol';
 import './Error.sol';
 import './libs/AddressUtils.sol';
 import './IModule.sol';
@@ -15,6 +16,7 @@ abstract contract ModuleBase is
     UUPSUpgradeable,
     AccessControlUpgradeable,
     ReentrancyGuardUpgradeable,
+    PausableUpgradeable,
     IModule
 {
     bytes32 public constant ADMIN_ROLE = DEFAULT_ADMIN_ROLE;
@@ -40,7 +42,16 @@ abstract contract ModuleBase is
         __AccessControl_init();
         __UUPSUpgradeable_init();
         __ReentrancyGuard_init();
+        __Pausable_init();
         _grantRole(ADMIN_ROLE, msg.sender);
+    }
+
+    function pause() external onlyRole(ADMIN_ROLE) {
+        _pause();
+    }
+
+    function unpause() external onlyRole(ADMIN_ROLE) {
+        _unpause();
     }
 
     function _authorizeUpgrade(
@@ -52,7 +63,7 @@ abstract contract ModuleBase is
         _;
     }
 
-    function registerModule(address module) external virtual onlyRole(ADMIN_ROLE) {
+    function registerModule(address module) external virtual onlyRole(ADMIN_ROLE) whenNotPaused {
         string memory name = IModule(module).getName();
         bytes32 flag = keccak256(bytes(name));
         if (modules[flag].moduleAddress != address(0)) revert AlreadySet();
@@ -64,7 +75,9 @@ abstract contract ModuleBase is
         emit registerModuleEvent(module);
     }
 
-    function unRegisterModule(string memory name) external virtual onlyRole(ADMIN_ROLE) {
+    function unRegisterModule(
+        string memory name
+    ) external virtual onlyRole(ADMIN_ROLE) whenNotPaused {
         bytes32 flag = keccak256(bytes(name));
         ModuleInfo storage moduleInfo = modules[flag];
         address oldAddress = moduleInfo.moduleAddress;
@@ -83,7 +96,7 @@ abstract contract ModuleBase is
     function updateModule(
         string memory name,
         address newAddress
-    ) external virtual onlyRole(ADMIN_ROLE) {
+    ) external virtual onlyRole(ADMIN_ROLE) whenNotPaused {
         bytes32 flag = keccak256(bytes(name));
         ModuleInfo storage moduleInfo = modules[flag];
         address oldAddress = moduleInfo.moduleAddress;
@@ -189,6 +202,14 @@ abstract contract ModuleBase is
         uint256 value
     ) internal returns (bytes memory) {
         return _callAssembly(1, moduleFlag, signature, params, value);
+    }
+
+    function callModuleDele(
+        bytes32 moduleFlag,
+        string memory signature,
+        bytes memory params
+    ) internal returns (bytes memory) {
+        return _callAssembly(0, moduleFlag, signature, params, 0);
     }
 
     receive() external payable virtual {

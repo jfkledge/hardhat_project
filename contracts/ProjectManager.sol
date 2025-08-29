@@ -6,8 +6,6 @@ import './ModuleBase.sol';
 
 contract ProjectManager is ModuleBase {
     uint64 public nextProjectId;
-    uint96 private constant MIN_DONATION = 0;
-    uint256 private constant BUFFER_TIME = 900;
     mapping(uint64 => Project) public projects;
     mapping(address => uint64[]) public creatorProjects;
 
@@ -31,8 +29,8 @@ contract ProjectManager is ModuleBase {
         uint64 deadline,
         bool openDonationNow
     ) external {
-        if (goal == MIN_DONATION) revert InvalidGoal();
-        if (deadline <= block.timestamp + BUFFER_TIME) revert InvalidDeadline();
+        if (goal == ModuleNames.MIN_DONATION) revert InvalidGoal();
+        if (deadline <= block.timestamp + ModuleNames.BUFFER_TIME) revert InvalidDeadline();
         ProjectStatus status = openDonationNow ? ProjectStatus.Fundraising : ProjectStatus.Created;
         uint64 projectId = nextProjectId;
         unchecked {
@@ -44,7 +42,7 @@ contract ProjectManager is ModuleBase {
             description: description,
             goal: goal,
             deadline: deadline,
-            amountRaised: MIN_DONATION,
+            amountRaised: ModuleNames.MIN_DONATION,
             status: status
         });
         creatorProjects[msg.sender].push(projectId);
@@ -82,14 +80,14 @@ contract ProjectManager is ModuleBase {
             uint96 goal = project.goal;
             uint96 amountRaised = project.amountRaised;
             uint64 deadline = project.deadline;
-            if (nowTimestamp + BUFFER_TIME > deadline && amountRaised < goal) {
+            if (nowTimestamp + ModuleNames.BUFFER_TIME > deadline && amountRaised < goal) {
                 newStatus = ProjectStatus.Failed;
             } else if (amountRaised >= goal) {
                 newStatus = ProjectStatus.Successful;
             }
         } else if (
             (oldStatus == ProjectStatus.Failed || oldStatus == ProjectStatus.Claimed) &&
-            project.amountRaised == MIN_DONATION
+            project.amountRaised == ModuleNames.MIN_DONATION
         ) {
             newStatus = ProjectStatus.Ended;
         }
@@ -99,48 +97,17 @@ contract ProjectManager is ModuleBase {
         }
     }
 
-    function beforeDonateHook(
-        uint64 projectId
-    ) external payable onlyTrustedModule returns (uint96, uint64) {
-        Project storage project = _getProject(projectId);
-        ProjectStatus status = project.status;
-        if (status != ProjectStatus.Fundraising) {
-            revert NotInStatus(ProjectStatus.Fundraising, status);
-        }
-        uint64 nowTimestamp = uint64(block.timestamp);
-        if (nowTimestamp + BUFFER_TIME > project.deadline) revert ProjectDeadlinePassed();
-        if (msg.value > type(uint96).max) revert ValueTooLarge();
-        uint96 msgValue = uint96(msg.value);
-        if (msgValue == MIN_DONATION) revert DonationTooSmall();
-        project.amountRaised += msgValue;
-        emit ProjectUpdateStatus(projectId, project.status);
-        return (msgValue, nowTimestamp);
+    function setProjectAmountRaised(uint64 proejctId, uint96 amount) external onlyTrustedModule {
+        Project storage project = _getProject(proejctId);
+        project.amountRaised += amount;
+        emit ProjectUpdateStatus(proejctId, project.status);
     }
 
-    function beforeClaimFundsHook(uint64 projectId) external onlyTrustedModule returns (uint96) {
+    function clearProjectAmoutRaised(uint64 projectId) external onlyTrustedModule {
         Project storage project = _getProject(projectId);
-        if (project.status != ProjectStatus.Successful) {
-            revert NotInStatus(ProjectStatus.Successful, project.status);
-        }
-        uint96 amount = project.amountRaised;
-        if (amount == MIN_DONATION) revert NoFundsToClaim();
-        project.amountRaised = MIN_DONATION;
+        project.amountRaised = ModuleNames.MIN_DONATION;
         project.status = ProjectStatus.Claimed;
-        return amount;
-    }
-
-    function beforeRefundHook(uint64 projectId) external view {
-        ProjectStatus status = _getProject(projectId).status;
-        if (status != ProjectStatus.Failed) {
-            revert NotInStatus(ProjectStatus.Failed, status);
-        }
-    }
-
-    function refund(uint64 projectId, uint96 amount) external onlyTrustedModule {
-        Project storage project = _getProject(projectId);
-        unchecked {
-            project.amountRaised -= amount;
-        }
+        emit ProjectUpdateStatus(projectId, project.status);
     }
 
     function cancelProject(
@@ -151,9 +118,16 @@ contract ProjectManager is ModuleBase {
         if (oldStatus != ProjectStatus.Created && oldStatus != ProjectStatus.Fundraising) {
             revert NotInStatus(ProjectStatus.Created, oldStatus);
         }
-        if (project.amountRaised != MIN_DONATION) revert AlreadyRaisedFunds();
+        if (project.amountRaised != ModuleNames.MIN_DONATION) revert AlreadyRaisedFunds();
         project.status = ProjectStatus.Cancelled;
         emit ProjectUpdateStatus(projectId, ProjectStatus.Cancelled);
+    }
+
+    function refund(uint64 projectId, uint96 amount) external onlyTrustedModule {
+        Project storage project = _getProject(projectId);
+        unchecked {
+            project.amountRaised -= amount;
+        }
     }
 
     /**
