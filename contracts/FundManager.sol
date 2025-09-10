@@ -25,7 +25,7 @@ contract FundManager is ModuleBase {
 
     modifier onlyProjectOwner(uint64 projectId, PermissionType permission) {
         bytes memory data = callModuleView(
-            ModuleNames.PROJECT_MANAGER_HASH,
+            getModuleAddress(ModuleNames.PROJECT_MANAGER),
             'getProjectCreator(uint64)',
             abi.encode(projectId)
         );
@@ -35,7 +35,7 @@ contract FundManager is ModuleBase {
             _;
         } else {
             bytes memory permissionData = callModuleView(
-                ModuleNames.ROLE_ACCESS_HASH,
+                getModuleAddress(ModuleNames.ROLE_ACCESS),
                 'hasPermission(uint64,PermissionType,address)',
                 abi.encode(projectId, permission, currentMsgSender)
             );
@@ -50,7 +50,7 @@ contract FundManager is ModuleBase {
      */
     function donate(uint64 projectId) external payable {
         bytes memory data = callModuleView(
-            ModuleNames.PROJECT_MANAGER_HASH,
+            getModuleAddress(ModuleNames.PROJECT_MANAGER),
             'getProjectDetail(uint64)',
             abi.encode(projectId)
         );
@@ -63,7 +63,7 @@ contract FundManager is ModuleBase {
         if (msgValue == ModuleNames.MIN_DONATION) revert DonationTooSmall();
         // update project amountRaised
         callModuleView(
-            ModuleNames.PROJECT_MANAGER_HASH,
+            getModuleAddress(ModuleNames.PROJECT_MANAGER),
             'setProjectAmountRaised(uint64,uint96)',
             abi.encode(projectId, msgValue)
         );
@@ -78,7 +78,7 @@ contract FundManager is ModuleBase {
             hasDonatedToProject[projectId][msg.sender] = true;
         }
         callModuleView(
-            ModuleNames.PROJECT_MANAGER_HASH,
+            getModuleAddress(ModuleNames.PROJECT_MANAGER),
             'updateProjectStatus(uint64)',
             abi.encode(projectId)
         );
@@ -92,7 +92,7 @@ contract FundManager is ModuleBase {
         uint64 projectId
     ) external nonReentrant onlyProjectOwner(projectId, PermissionType.Withdraw) {
         bytes memory data = callModuleView(
-            ModuleNames.PROJECT_MANAGER_HASH,
+            getModuleAddress(ModuleNames.PROJECT_MANAGER),
             'getProjectDetail(uint64)',
             abi.encode(projectId)
         );
@@ -101,7 +101,7 @@ contract FundManager is ModuleBase {
         uint96 amount = project.amountRaised;
         //clean project amountRaised
         callModuleView(
-            ModuleNames.PROJECT_MANAGER_HASH,
+            getModuleAddress(ModuleNames.PROJECT_MANAGER),
             'clearProjectAmoutRaised(uint64)',
             abi.encode(projectId)
         );
@@ -115,7 +115,7 @@ contract FundManager is ModuleBase {
      */
     function refund(uint64 projectId) external nonReentrant {
         bytes memory data = callModuleView(
-            ModuleNames.PROJECT_MANAGER_HASH,
+            getModuleAddress(ModuleNames.PROJECT_MANAGER),
             'getProjectDetail(uint64)',
             abi.encode(projectId)
         );
@@ -127,7 +127,7 @@ contract FundManager is ModuleBase {
         if (amount == MIN_DONATION) revert NoDonationToRefund();
         contributions[projectId][msg.sender] = MIN_DONATION;
         callModuleView(
-            ModuleNames.PROJECT_MANAGER_HASH,
+            getModuleAddress(ModuleNames.PROJECT_MANAGER),
             'refund(uint64,uint96)',
             abi.encode(projectId, amount)
         );

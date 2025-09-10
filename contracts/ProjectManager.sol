@@ -3,12 +3,9 @@ pragma solidity ^0.8.28;
 
 // Uncomment this line to use console.log
 import './ModuleBase.sol';
+import './ProjectStorage.sol';
 
-contract ProjectManager is ModuleBase {
-    uint64 public nextProjectId;
-    mapping(uint64 => Project) public projects;
-    mapping(address => uint64[]) public creatorProjects;
-
+contract ProjectManager is ModuleBase, ProjectStorage {
     event ProjectCreated(
         uint64 indexed projectId,
         address indexed creator,
@@ -139,30 +136,5 @@ contract ProjectManager is ModuleBase {
             revert ProjectNotFound();
         }
         return project;
-    }
-
-    function getProjectCreator(uint64 projectId) external view returns (address) {
-        return _getProject(projectId).creator;
-    }
-
-    function getProjectDetail(uint64 projectId) external view returns (Project memory) {
-        Project memory project = projects[projectId];
-        if (project.status == ProjectStatus.Uninitialized) {
-            revert ProjectNotFound();
-        }
-        return project;
-    }
-
-    function getMyProjectIds() external view returns (uint64[] memory) {
-        return creatorProjects[msg.sender];
-    }
-
-    function getMyCreatedProjects() external view returns (Project[] memory) {
-        uint64[] memory projectIds = creatorProjects[msg.sender];
-        Project[] memory myProjects = new Project[](projectIds.length);
-        for (uint256 i = 0; i < projectIds.length; i++) {
-            myProjects[i] = projects[projectIds[i]];
-        }
-        return myProjects;
     }
 }

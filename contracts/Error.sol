@@ -19,4 +19,4 @@ error AlreadySet();
 error NotSet();
 error NotProjectOwner();
 error CallFailed();
-error UnRegisteredModule();
+error UnauthorizedCaller();

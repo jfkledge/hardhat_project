@@ -21,7 +21,7 @@ abstract contract ModuleBase is
 {
     bytes32 public constant ADMIN_ROLE = DEFAULT_ADMIN_ROLE;
     using AddressUtils for address;
-    mapping(bytes32 => ModuleInfo) internal modules;
+    mapping(address => ModuleInfo) internal modules;
     ModuleInfo[] private moduleList;
     mapping(address => bool) public trustedModules;
 
@@ -59,63 +59,47 @@ abstract contract ModuleBase is
     ) internal virtual override onlyRole(ADMIN_ROLE) {}
 
     modifier onlyTrustedModule() {
-        if (!trustedModules[msg.sender]) revert('Unauthorized caller');
+        if (!trustedModules[msg.sender]) revert UnauthorizedCaller();
         _;
     }
 
-    function registerModule(address module) external virtual onlyRole(ADMIN_ROLE) whenNotPaused {
-        string memory name = IModule(module).getName();
-        bytes32 flag = keccak256(bytes(name));
-        if (modules[flag].moduleAddress != address(0)) revert AlreadySet();
-        module.checkAddressIsValid();
-        ModuleInfo memory info = ModuleInfo({ name: name, moduleAddress: module });
-        modules[flag] = info;
+    function registerModule(
+        address moduleAddress
+    ) external virtual onlyRole(ADMIN_ROLE) whenNotPaused {
+        moduleAddress.checkAddressIsValid();
+        string memory name = IModule(moduleAddress).getName();
+        if (modules[moduleAddress].moduleAddress != address(0)) revert AlreadySet();
+        ModuleInfo memory info = ModuleInfo({ name: name, moduleAddress: moduleAddress });
+        modules[moduleAddress] = info;
         moduleList.push(info);
-        trustedModules[module] = true;
-        emit registerModuleEvent(module);
+        trustedModules[moduleAddress] = true;
+        emit registerModuleEvent(moduleAddress);
     }
 
     function unRegisterModule(
-        string memory name
+        address moduleAddress
     ) external virtual onlyRole(ADMIN_ROLE) whenNotPaused {
-        bytes32 flag = keccak256(bytes(name));
-        ModuleInfo storage moduleInfo = modules[flag];
-        address oldAddress = moduleInfo.moduleAddress;
-        if (oldAddress == address(0)) revert UnRegisteredModule();
-        moduleInfo.moduleAddress = address(0);
+        moduleAddress.checkAddressIsValid();
         uint length = moduleList.length;
         for (uint i = 0; i < length; i++) {
-            if (keccak256(bytes(moduleList[i].name)) == flag) {
+            if (moduleList[i].moduleAddress == moduleAddress) {
+                modules[moduleAddress].moduleAddress = address(0);
+                trustedModules[moduleAddress] = false;
                 moduleList[i].moduleAddress = address(0);
+                emit unRegisterModuleEvent(moduleList[i].name, moduleAddress);
                 break;
             }
         }
-        emit unRegisterModuleEvent(name, oldAddress);
     }
 
-    function updateModule(
-        string memory name,
-        address newAddress
-    ) external virtual onlyRole(ADMIN_ROLE) whenNotPaused {
-        bytes32 flag = keccak256(bytes(name));
-        ModuleInfo storage moduleInfo = modules[flag];
-        address oldAddress = moduleInfo.moduleAddress;
-        newAddress.checkAddressIsValid();
-        moduleInfo.moduleAddress = newAddress;
+    function getModuleAddress(string memory name) internal view returns (address moduleAddress) {
         uint length = moduleList.length;
         for (uint i = 0; i < length; i++) {
-            if (keccak256(bytes(moduleList[i].name)) == flag) {
-                moduleList[i].moduleAddress = newAddress;
-                break;
+            if (keccak256(bytes(moduleList[i].name)) == keccak256(bytes(name))) {
+                return moduleList[i].moduleAddress;
             }
         }
-        emit updateModuleEvent(name, newAddress, oldAddress);
-    }
-
-    function getModule(bytes32 flag) internal view virtual returns (address) {
-        address module = modules[flag].moduleAddress;
-        if (module == address(0)) revert NotSet();
-        return module;
+        return address(0);
     }
 
     function getAllModules() external view returns (ModuleInfo[] memory) {
@@ -129,6 +113,7 @@ abstract contract ModuleBase is
         bytes memory params,
         uint256 value
     ) public returns (bytes memory result) {
+        targetAddress.checkAddressIsValid();
         assembly {
             let ptr := mload(0x40)
             mstore(ptr, selector)
@@ -174,12 +159,12 @@ abstract contract ModuleBase is
 
     function _callAssembly(
         uint callType,
-        bytes32 moduleFlag,
+        address moduleAddress,
         string memory signature,
         bytes memory params,
         uint256 value
     ) private returns (bytes memory) {
-        address target = getModule(moduleFlag);
+        address target = modules[moduleAddress].moduleAddress;
         bytes4 selector = bytes4(keccak256(bytes(signature)));
         return callAssembly(callType, target, selector, params, value);
     }
@@ -188,28 +173,28 @@ abstract contract ModuleBase is
       only read
      */
     function callModuleView(
-        bytes32 moduleFlag,
+        address moduleAddress,
         string memory signature,
         bytes memory params
     ) internal returns (bytes memory) {
-        return _callAssembly(3, moduleFlag, signature, params, 0);
+        return _callAssembly(3, moduleAddress, signature, params, 0);
     }
 
     function callModule(
-        bytes32 moduleFlag,
+        address moduleAddress,
         string memory signature,
         bytes memory params,
         uint256 value
     ) internal returns (bytes memory) {
-        return _callAssembly(1, moduleFlag, signature, params, value);
+        return _callAssembly(1, moduleAddress, signature, params, value);
     }
 
     function callModuleDele(
-        bytes32 moduleFlag,
+        address moduleAddress,
         string memory signature,
         bytes memory params
     ) internal returns (bytes memory) {
-        return _callAssembly(0, moduleFlag, signature, params, 0);
+        return _callAssembly(0, moduleAddress, signature, params, 0);
     }
 
     receive() external payable virtual {

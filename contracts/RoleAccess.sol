@@ -24,7 +24,7 @@ contract RoleAccess is ModuleBase {
 
     modifier onlyProjectCreator(uint64 projectId) {
         bytes memory data = callModuleView(
-            ModuleNames.PROJECT_MANAGER_HASH,
+            getModuleAddress(ModuleNames.PROJECT_MANAGER),
             'getProjectCreator(uint64)',
             abi.encode(projectId)
         );
