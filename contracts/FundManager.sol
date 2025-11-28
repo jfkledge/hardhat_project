@@ -3,13 +3,11 @@ pragma solidity ^0.8.28;
 
 // Uncomment this line to use console.log
 import './ModuleBase.sol';
+import './interfaces/IFundManager.sol';
+import { DonationRecord, PermissionType, Project, ProjectStatus } from './ProjectEnum.sol';
+import { IProjectManagerError, IFundManagerError } from './interfaces/IError.sol';
 
-contract FundManager is ModuleBase {
-    event ProjectClaimFunds(uint64 indexed projectId, address indexed creator, uint96 amountRaised);
-    event ProjectDonate(uint64 indexed projectId, address indexed user, uint96 amount);
-    event ProjectRefund(uint64 indexed projectId, address indexed user, uint96 amount);
-
-    uint96 private constant MIN_DONATION = 0;
+contract FundManager is ModuleBase, IFundManager, IProjectManagerError, IFundManagerError {
     //ervery projectId mapping (user mapping donate count)
     mapping(uint64 => mapping(address => uint96)) public contributions;
     //erery user mapping DonationRecord array
@@ -26,12 +24,12 @@ contract FundManager is ModuleBase {
     modifier onlyProjectOwner(uint64 projectId, PermissionType permission) {
         bytes memory data = callModuleView(
             getModuleAddress(ModuleNames.PROJECT_MANAGER),
-            'getProjectCreator(uint64)',
+            'getProjectDetail(uint64)',
             abi.encode(projectId)
         );
-        address projectCreator = abi.decode(data, (address));
+        Project memory project = abi.decode(data, (Project));
         address currentMsgSender = msg.sender;
-        if (currentMsgSender == projectCreator) {
+        if (currentMsgSender == project.creator) {
             _;
         } else {
             bytes memory permissionData = callModuleView(
@@ -49,40 +47,27 @@ contract FundManager is ModuleBase {
      * donate project by projectId
      */
     function donate(uint64 projectId) external payable {
-        bytes memory data = callModuleView(
-            getModuleAddress(ModuleNames.PROJECT_MANAGER),
-            'getProjectDetail(uint64)',
-            abi.encode(projectId)
-        );
-        Project memory project = abi.decode(data, (Project));
-        uint64 nowTimestamp = uint64(block.timestamp);
-        if (nowTimestamp + ModuleNames.BUFFER_TIME > project.deadline)
-            revert ProjectDeadlinePassed();
-        if (msg.value > type(uint96).max) revert ValueTooLarge();
+        uint64 currentTime = uint64(block.timestamp);
         uint96 msgValue = uint96(msg.value);
-        if (msgValue == ModuleNames.MIN_DONATION) revert DonationTooSmall();
         // update project amountRaised
         callModuleView(
             getModuleAddress(ModuleNames.PROJECT_MANAGER),
-            'setProjectAmountRaised(uint64,uint96)',
-            abi.encode(projectId, msgValue)
+            'donate(uint64,uint96,uint64)',
+            abi.encode(projectId, msgValue, currentTime)
         );
-
-        contributions[projectId][msg.sender] += msgValue;
-        //add every user donate record
-        userDonations[msg.sender].push(
-            DonationRecord({ projectId: projectId, amount: msgValue, timestamp: nowTimestamp })
-        );
-        if (!hasDonatedToProject[projectId][msg.sender]) {
-            projectDonors[projectId].push(msg.sender);
-            hasDonatedToProject[projectId][msg.sender] = true;
+        address currentMsgSender = msg.sender;
+        unchecked {
+            contributions[projectId][currentMsgSender] += msgValue;
         }
-        callModuleView(
-            getModuleAddress(ModuleNames.PROJECT_MANAGER),
-            'updateProjectStatus(uint64)',
-            abi.encode(projectId)
+        //add every user donate record
+        userDonations[currentMsgSender].push(
+            DonationRecord({ projectId: projectId, amount: msgValue, timestamp: currentTime })
         );
-        emit ProjectDonate(projectId, msg.sender, msgValue);
+        if (!hasDonatedToProject[projectId][currentMsgSender]) {
+            projectDonors[projectId].push(currentMsgSender);
+            hasDonatedToProject[projectId][currentMsgSender] = true;
+        }
+        emit ProjectDonate(projectId, currentMsgSender, msgValue);
     }
 
     /**
@@ -97,12 +82,14 @@ contract FundManager is ModuleBase {
             abi.encode(projectId)
         );
         Project memory project = abi.decode(data, (Project));
-        if (project.amountRaised == ModuleNames.MIN_DONATION) revert NoFundsToClaim();
+        if (project.status != ProjectStatus.Successful) {
+            revert NotInStatus(ProjectStatus.Successful, project.status);
+        }
         uint96 amount = project.amountRaised;
         //clean project amountRaised
         callModuleView(
             getModuleAddress(ModuleNames.PROJECT_MANAGER),
-            'clearProjectAmoutRaised(uint64)',
+            'claimFunds(uint64)',
             abi.encode(projectId)
         );
         (bool successful, ) = payable(msg.sender).call{ value: amount }('');
@@ -120,12 +107,12 @@ contract FundManager is ModuleBase {
             abi.encode(projectId)
         );
         Project memory project = abi.decode(data, (Project));
-        if (project.status != ProjectStatus.Failed) {
+        if (project.status != ProjectStatus.Failed && project.status != ProjectStatus.Cancelled) {
             revert NotInStatus(ProjectStatus.Failed, project.status);
         }
         uint96 amount = contributions[projectId][msg.sender];
-        if (amount == MIN_DONATION) revert NoDonationToRefund();
-        contributions[projectId][msg.sender] = MIN_DONATION;
+        if (amount == ModuleNames.MIN_DONATION) revert NoDonationToRefund();
+        contributions[projectId][msg.sender] = ModuleNames.MIN_DONATION;
         callModuleView(
             getModuleAddress(ModuleNames.PROJECT_MANAGER),
             'refund(uint64,uint96)',

@@ -7,9 +7,9 @@ import '@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol';
 import '@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol';
 import '@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol';
 import '@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol';
-import './Error.sol';
+import { IModuleBaseError } from './interfaces/IError.sol';
 import './libs/AddressUtils.sol';
-import './IModule.sol';
+import './interfaces/IModuleBase.sol';
 import { ModuleNames } from './libs/ModuleNames.sol';
 
 abstract contract ModuleBase is
@@ -17,21 +17,13 @@ abstract contract ModuleBase is
     AccessControlUpgradeable,
     ReentrancyGuardUpgradeable,
     PausableUpgradeable,
-    IModule
+    IModuleBase,
+    IModuleBaseError
 {
     bytes32 public constant ADMIN_ROLE = DEFAULT_ADMIN_ROLE;
     using AddressUtils for address;
     mapping(address => ModuleInfo) internal modules;
     ModuleInfo[] private moduleList;
-    mapping(address => bool) public trustedModules;
-
-    event registerModuleEvent(address indexed _contractAddress);
-    event unRegisterModuleEvent(string indexed name, address indexed _oldAddress);
-    event updateModuleEvent(
-        string indexed name,
-        address indexed newAddress,
-        address indexed oldAddress
-    );
 
     struct ModuleInfo {
         string name;
@@ -58,21 +50,15 @@ abstract contract ModuleBase is
         address newImplementation
     ) internal virtual override onlyRole(ADMIN_ROLE) {}
 
-    modifier onlyTrustedModule() {
-        if (!trustedModules[msg.sender]) revert UnauthorizedCaller();
-        _;
-    }
-
     function registerModule(
         address moduleAddress
     ) external virtual onlyRole(ADMIN_ROLE) whenNotPaused {
         moduleAddress.checkAddressIsValid();
-        string memory name = IModule(moduleAddress).getName();
+        string memory name = IModuleBase(moduleAddress).getName();
         if (modules[moduleAddress].moduleAddress != address(0)) revert AlreadySet();
         ModuleInfo memory info = ModuleInfo({ name: name, moduleAddress: moduleAddress });
         modules[moduleAddress] = info;
         moduleList.push(info);
-        trustedModules[moduleAddress] = true;
         emit registerModuleEvent(moduleAddress);
     }
 
@@ -84,7 +70,6 @@ abstract contract ModuleBase is
         for (uint i = 0; i < length; i++) {
             if (moduleList[i].moduleAddress == moduleAddress) {
                 modules[moduleAddress].moduleAddress = address(0);
-                trustedModules[moduleAddress] = false;
                 moduleList[i].moduleAddress = address(0);
                 emit unRegisterModuleEvent(moduleList[i].name, moduleAddress);
                 break;
@@ -100,6 +85,15 @@ abstract contract ModuleBase is
             }
         }
         return address(0);
+    }
+
+    /**
+        only trusted module can call
+     */
+    modifier onlyAuthorizedContract(string memory name) {
+        address contractAddress = getModuleAddress(name);
+        if (msg.sender != contractAddress) revert UnauthorizedCaller();
+        _;
     }
 
     function getAllModules() external view returns (ModuleInfo[] memory) {
@@ -143,7 +137,6 @@ abstract contract ModuleBase is
             case 2 {
                 success := staticcall(gas(), targetAddress, ptr, totalLen, 0, 0)
             }
-
             let size := returndatasize()
             result := mload(0x40)
             mstore(0x40, add(result, add(size, 0x20)))

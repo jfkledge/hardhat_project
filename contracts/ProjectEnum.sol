@@ -7,7 +7,6 @@ enum ProjectStatus {
     Fundraising,
     Successful,
     Failed,
-    Claimed,
     Ended,
     Cancelled
 }
@@ -19,17 +18,17 @@ enum PermissionType {
 }
 
 struct Project {
-    address creator;
-    string title;
-    string description;
-    uint96 goal;
-    uint64 deadline;
-    uint96 amountRaised;
-    ProjectStatus status;
+    address creator; // slot 0
+    uint96 goal; // slot ０
+    uint96 amountRaised; // slot 1
+    uint64 deadline; // slot 1
+    ProjectStatus status; // slot １
+    string title; // slot 3
+    string description; // slot 4
 }
 
 struct DonationRecord {
     uint64 projectId;
-    uint96 amount;
     uint64 timestamp;
+    uint96 amount;
 }

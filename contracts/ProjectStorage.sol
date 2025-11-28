@@ -1,18 +1,14 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
-import './ProjectEnum.sol';
-import './Error.sol';
+import { Project, ProjectStatus } from './ProjectEnum.sol';
+import { IProjectManagerError } from './interfaces/IError.sol';
 
-contract ProjectStorage {
+contract ProjectStorage is IProjectManagerError {
     uint64 public nextProjectId;
     mapping(uint64 => Project) public projects;
     mapping(address => uint64[]) public creatorProjects;
 
-    function getProjectCreator(uint64 projectId) external view returns (address) {
-        return projects[projectId].creator;
-    }
-
-    function getProjectDetails(uint64 projectId) external view returns (Project memory) {
+    function getProjectDetail(uint64 projectId) external view returns (Project memory) {
         Project memory project = projects[projectId];
         if (project.status == ProjectStatus.Uninitialized) revert ProjectNotFound();
         return project;
@@ -30,5 +26,4 @@ contract ProjectStorage {
         }
         return myProjects;
     }
-
 }

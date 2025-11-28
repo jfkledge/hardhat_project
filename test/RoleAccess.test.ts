@@ -1,11 +1,11 @@
 import { expect } from 'chai';
 import { ethers, upgrades } from 'hardhat';
-import { DeFundMe, RoleAccess } from '../typechain-types';
+import { FundManager, RoleAccess } from '../typechain-types';
 
 describe('DeFundMe', () => {
   let admin: any;
   let user: any;
-  let deFundMe: DeFundMe;
+  let deFundMe: FundManager;
   let roleAccess: RoleAccess;
 
   beforeEach(async function () {
@@ -20,9 +20,6 @@ describe('DeFundMe', () => {
     deFundMe = (await upgrades.deployProxy(DeFundMeFactory, [], {
       kind: 'uups',
       initializer: 'initialize',
-    })) as DeFundMe;
-
-    //// 设置权限管理器
-    await roleAccess.setDefundMe(deFundMe.getAddress());
+    })) as FundManager;
   });
 });
