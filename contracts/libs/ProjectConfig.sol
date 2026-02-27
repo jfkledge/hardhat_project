@@ -1,0 +1,8 @@
+// contracts/Constants.sol
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.28;
+
+library ProjectConfig {
+    uint96 internal constant MIN_DONATION = 0;
+    uint256 internal constant BUFFER_TIME = 900;
+}

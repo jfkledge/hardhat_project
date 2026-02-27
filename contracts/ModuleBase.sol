@@ -7,28 +7,23 @@ import '@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol';
 import '@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol';
 import '@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol';
 import '@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol';
-import { IModuleBaseError } from './interfaces/IError.sol';
-import './libs/AddressUtils.sol';
+import './libs/AssembleUtils.sol';
 import './interfaces/IModuleBase.sol';
-import { ModuleNames } from './libs/ModuleNames.sol';
+import './libs/ModuleConfig.sol';
 
 abstract contract ModuleBase is
     UUPSUpgradeable,
     AccessControlUpgradeable,
     ReentrancyGuardUpgradeable,
     PausableUpgradeable,
-    IModuleBase,
-    IModuleBaseError
+    IModuleBase
 {
     bytes32 public constant ADMIN_ROLE = DEFAULT_ADMIN_ROLE;
-    using AddressUtils for address;
+    //mapping from module address to ModuleInfo
     mapping(address => ModuleInfo) internal modules;
+    //mapping from module name hash to module address
+    mapping(bytes32 => address) private _moduleNameToAddress;
     ModuleInfo[] private moduleList;
-
-    struct ModuleInfo {
-        string name;
-        address moduleAddress;
-    }
 
     function initialize() public virtual initializer {
         __AccessControl_init();
@@ -53,11 +48,17 @@ abstract contract ModuleBase is
     function registerModule(
         address moduleAddress
     ) external virtual onlyRole(ADMIN_ROLE) whenNotPaused {
-        moduleAddress.checkAddressIsValid();
+        AssembleUtils.checkAddressIsValid(moduleAddress);
         string memory name = IModuleBase(moduleAddress).getName();
+        bytes32 nameHash = keccak256(bytes(name));
+
         if (modules[moduleAddress].moduleAddress != address(0)) revert AlreadySet();
+        if (_moduleNameToAddress[nameHash] != address(0)) revert AlreadySet(); // Also check name hash to prevent name collision
+
         ModuleInfo memory info = ModuleInfo({ name: name, moduleAddress: moduleAddress });
         modules[moduleAddress] = info;
+        _moduleNameToAddress[nameHash] = moduleAddress;
+        //add to moduleList
         moduleList.push(info);
         emit registerModuleEvent(moduleAddress);
     }
@@ -65,26 +66,38 @@ abstract contract ModuleBase is
     function unRegisterModule(
         address moduleAddress
     ) external virtual onlyRole(ADMIN_ROLE) whenNotPaused {
-        moduleAddress.checkAddressIsValid();
+        AssembleUtils.checkAddressIsValid(moduleAddress);
+        if (modules[moduleAddress].moduleAddress == address(0)) revert ModuleNotFound(); // Use new error
+
+        string memory name = modules[moduleAddress].name;
+        bytes32 nameHash = keccak256(bytes(name));
+        delete modules[moduleAddress];
+        delete _moduleNameToAddress[nameHash];
+
         uint length = moduleList.length;
-        for (uint i = 0; i < length; i++) {
+        uint256 indexToRemove = type(uint256).max; // Sentinel value
+        for (uint256 i = 0; i < length; i++) {
             if (moduleList[i].moduleAddress == moduleAddress) {
-                modules[moduleAddress].moduleAddress = address(0);
-                moduleList[i].moduleAddress = address(0);
-                emit unRegisterModuleEvent(moduleList[i].name, moduleAddress);
+                indexToRemove = i;
                 break;
             }
         }
+        if (indexToRemove == type(uint256).max) revert ModuleNotFound(); // Should not happen if modules[moduleAddress] was not address(0)
+        // If the module is not the last one, swap it with the last element
+        if (indexToRemove != length - 1) {
+            moduleList[indexToRemove] = moduleList[length - 1];
+            // If using _moduleListIndex:
+            // _moduleListIndex[moduleList[indexToRemove].moduleAddress] = indexToRemove;
+        }
+        // Remove the last element (which is either the original element or the swapped element)
+        moduleList.pop();
+        // delete _moduleListIndex[moduleAddress]; // If using index mapping
+        emit unRegisterModuleEvent(name, moduleAddress);
     }
 
     function getModuleAddress(string memory name) internal view returns (address moduleAddress) {
-        uint length = moduleList.length;
-        for (uint i = 0; i < length; i++) {
-            if (keccak256(bytes(moduleList[i].name)) == keccak256(bytes(name))) {
-                return moduleList[i].moduleAddress;
-            }
-        }
-        return address(0);
+        bytes32 nameHash = keccak256(bytes(name));
+        return _moduleNameToAddress[nameHash];
     }
 
     /**
@@ -100,56 +113,6 @@ abstract contract ModuleBase is
         return moduleList;
     }
 
-    function callAssembly(
-        uint callType, //1.call 2.delegatecall 3.staticcall
-        address targetAddress,
-        bytes4 selector,
-        bytes memory params,
-        uint256 value
-    ) public returns (bytes memory result) {
-        targetAddress.checkAddressIsValid();
-        assembly {
-            let ptr := mload(0x40)
-            mstore(ptr, selector)
-
-            let len := mload(params)
-            let dataPtr := add(params, 0x20)
-
-            for {
-                let i := 0
-            } lt(i, len) {
-                i := add(i, 0x20)
-            } {
-                mstore(add(ptr, add(0x04, i)), mload(add(dataPtr, i)))
-            }
-
-            // total calldata length = 4 + len
-            let totalLen := add(0x04, len)
-
-            let success := 0
-            switch callType
-            case 0 {
-                success := call(gas(), targetAddress, value, ptr, totalLen, 0, 0)
-            }
-            case 1 {
-                success := delegatecall(gas(), targetAddress, ptr, totalLen, 0, 0)
-            }
-            case 2 {
-                success := staticcall(gas(), targetAddress, ptr, totalLen, 0, 0)
-            }
-            let size := returndatasize()
-            result := mload(0x40)
-            mstore(0x40, add(result, add(size, 0x20)))
-            mstore(result, size)
-            returndatacopy(add(result, 0x20), 0, size)
-
-            if iszero(success) {
-                revert(add(result, 0x20), size)
-            }
-        }
-        return result;
-    }
-
     function _callAssembly(
         uint callType,
         address moduleAddress,
@@ -158,22 +121,23 @@ abstract contract ModuleBase is
         uint256 value
     ) private returns (bytes memory) {
         address target = modules[moduleAddress].moduleAddress;
+        if (target == address(0)) revert NotSet(); // Ensure module is registered and active
         bytes4 selector = bytes4(keccak256(bytes(signature)));
-        return callAssembly(callType, target, selector, params, value);
+        return AssembleUtils.callAssembly(callType, target, selector, params, value);
     }
 
     /**
       only read
      */
-    function callModuleView(
+    function staticCall(
         address moduleAddress,
         string memory signature,
         bytes memory params
     ) internal returns (bytes memory) {
-        return _callAssembly(3, moduleAddress, signature, params, 0);
+        return _callAssembly(2, moduleAddress, signature, params, 0);
     }
 
-    function callModule(
+    function delegateCall(
         address moduleAddress,
         string memory signature,
         bytes memory params,
@@ -182,7 +146,7 @@ abstract contract ModuleBase is
         return _callAssembly(1, moduleAddress, signature, params, value);
     }
 
-    function callModuleDele(
+    function call(
         address moduleAddress,
         string memory signature,
         bytes memory params

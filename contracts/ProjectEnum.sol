@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
+import './libs/ProjectUtils.sol';
 
 enum ProjectStatus {
     Uninitialized,
@@ -27,8 +28,5 @@ struct Project {
     string description; // slot 4
 }
 
-struct DonationRecord {
-    uint64 projectId;
-    uint64 timestamp;
-    uint96 amount;
-}
+//global binding
+using ProjectUtils for Project global;

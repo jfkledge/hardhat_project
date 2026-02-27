@@ -8,9 +8,12 @@ interface IRoleAccess {
         PermissionType permission,
         address indexed user
     );
+
     event PermissionRevoked(
         uint64 indexed projectId,
         PermissionType permission,
         address indexed user
     );
+
+    error NotProjectOwner();
 }

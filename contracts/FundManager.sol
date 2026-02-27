@@ -4,10 +4,11 @@ pragma solidity ^0.8.28;
 // Uncomment this line to use console.log
 import './ModuleBase.sol';
 import './interfaces/IFundManager.sol';
-import { DonationRecord, PermissionType, Project, ProjectStatus } from './ProjectEnum.sol';
-import { IProjectManagerError, IFundManagerError } from './interfaces/IError.sol';
+import './interfaces/IProjectManager.sol';
+import { PermissionType, Project, ProjectStatus } from './ProjectEnum.sol';
+import { ProjectConfig } from './libs/ProjectConfig.sol';
 
-contract FundManager is ModuleBase, IFundManager, IProjectManagerError, IFundManagerError {
+contract FundManager is ModuleBase, IFundManager, IProjectManager {
     //ervery projectId mapping (user mapping donate count)
     mapping(uint64 => mapping(address => uint96)) public contributions;
     //erery user mapping DonationRecord array
@@ -18,13 +19,13 @@ contract FundManager is ModuleBase, IFundManager, IProjectManagerError, IFundMan
     mapping(uint64 => mapping(address => bool)) private hasDonatedToProject;
 
     function getName() external pure returns (string memory) {
-        return ModuleNames.FUND_MANAGER;
+        return ModuleConfig.FUND_MANAGER;
     }
 
     modifier onlyProjectOwner(uint64 projectId, PermissionType permission) {
-        bytes memory data = callModuleView(
-            getModuleAddress(ModuleNames.PROJECT_MANAGER),
-            'getProjectDetail(uint64)',
+        bytes memory data = staticCall(
+            getModuleAddress(ModuleConfig.PROJECT_MANAGER),
+            'getProject(uint64)',
             abi.encode(projectId)
         );
         Project memory project = abi.decode(data, (Project));
@@ -32,8 +33,8 @@ contract FundManager is ModuleBase, IFundManager, IProjectManagerError, IFundMan
         if (currentMsgSender == project.creator) {
             _;
         } else {
-            bytes memory permissionData = callModuleView(
-                getModuleAddress(ModuleNames.ROLE_ACCESS),
+            bytes memory permissionData = staticCall(
+                getModuleAddress(ModuleConfig.ROLE_ACCESS),
                 'hasPermission(uint64,PermissionType,address)',
                 abi.encode(projectId, permission, currentMsgSender)
             );
@@ -50,8 +51,8 @@ contract FundManager is ModuleBase, IFundManager, IProjectManagerError, IFundMan
         uint64 currentTime = uint64(block.timestamp);
         uint96 msgValue = uint96(msg.value);
         // update project amountRaised
-        callModuleView(
-            getModuleAddress(ModuleNames.PROJECT_MANAGER),
+        staticCall(
+            getModuleAddress(ModuleConfig.PROJECT_MANAGER),
             'donate(uint64,uint96,uint64)',
             abi.encode(projectId, msgValue, currentTime)
         );
@@ -76,19 +77,17 @@ contract FundManager is ModuleBase, IFundManager, IProjectManagerError, IFundMan
     function claimFunds(
         uint64 projectId
     ) external nonReentrant onlyProjectOwner(projectId, PermissionType.Withdraw) {
-        bytes memory data = callModuleView(
-            getModuleAddress(ModuleNames.PROJECT_MANAGER),
-            'getProjectDetail(uint64)',
+        bytes memory data = staticCall(
+            getModuleAddress(ModuleConfig.PROJECT_MANAGER),
+            'getProject(uint64)',
             abi.encode(projectId)
         );
         Project memory project = abi.decode(data, (Project));
-        if (project.status != ProjectStatus.Successful) {
-            revert NotInStatus(ProjectStatus.Successful, project.status);
-        }
+        project.checkStatus(ProjectStatus.Successful);
         uint96 amount = project.amountRaised;
         //clean project amountRaised
-        callModuleView(
-            getModuleAddress(ModuleNames.PROJECT_MANAGER),
+        staticCall(
+            getModuleAddress(ModuleConfig.PROJECT_MANAGER),
             'claimFunds(uint64)',
             abi.encode(projectId)
         );
@@ -101,20 +100,18 @@ contract FundManager is ModuleBase, IFundManager, IProjectManagerError, IFundMan
      * refund by projectId
      */
     function refund(uint64 projectId) external nonReentrant {
-        bytes memory data = callModuleView(
-            getModuleAddress(ModuleNames.PROJECT_MANAGER),
-            'getProjectDetail(uint64)',
+        bytes memory data = staticCall(
+            getModuleAddress(ModuleConfig.PROJECT_MANAGER),
+            'getProject(uint64)',
             abi.encode(projectId)
         );
         Project memory project = abi.decode(data, (Project));
-        if (project.status != ProjectStatus.Failed && project.status != ProjectStatus.Cancelled) {
-            revert NotInStatus(ProjectStatus.Failed, project.status);
-        }
+        project.checkStatus1(ProjectStatus.Failed, ProjectStatus.Cancelled);
         uint96 amount = contributions[projectId][msg.sender];
-        if (amount == ModuleNames.MIN_DONATION) revert NoDonationToRefund();
-        contributions[projectId][msg.sender] = ModuleNames.MIN_DONATION;
-        callModuleView(
-            getModuleAddress(ModuleNames.PROJECT_MANAGER),
+        if (amount == ProjectConfig.MIN_DONATION) revert NoDonationToRefund();
+        contributions[projectId][msg.sender] = ProjectConfig.MIN_DONATION;
+        staticCall(
+            getModuleAddress(ModuleConfig.PROJECT_MANAGER),
             'refund(uint64,uint96)',
             abi.encode(projectId, amount)
         );

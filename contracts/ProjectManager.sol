@@ -3,13 +3,50 @@ pragma solidity ^0.8.28;
 
 // Uncomment this line to use console.log
 import './ModuleBase.sol';
-import './ProjectStorage.sol';
+import { PermissionType, Project } from './ProjectEnum.sol';
+import { ProjectConfig } from './libs/ProjectConfig.sol';
 import './interfaces/IProjectManager.sol';
-import { Project, PermissionType } from './ProjectEnum.sol';
+
+// contract 關鍵字用於宣告一個新的合約（contract），在 Solidity 中它類似於其他語言的 class，但專門針對區塊鏈上的智能合約設計。
+// 例如下面這行表示我們聲明了一個名為 ProjectStorage 的智能合約：
+contract ProjectStorage {
+    uint64 public nextProjectId;
+    mapping(uint64 => Project) public projects;
+    mapping(address => uint64[]) public creatorProjects;
+
+    function getProject(uint64 projectId) external view returns (Project memory) {
+        Project memory project = projects[projectId];
+        project.checkExists();
+        return project;
+    }
+
+    /**
+     * get project struct by projectId
+     */
+    function _getProject(uint64 projectId) internal view returns (Project storage) {
+        Project storage project = projects[projectId];
+        project.checkExists();
+        return project;
+    }
+
+    function getMyProjectIds() external view returns (uint64[] memory) {
+        return creatorProjects[msg.sender];
+    }
+
+    function getMyCreatedProjects() external view returns (Project[] memory) {
+        uint64[] memory projectIds = creatorProjects[msg.sender];
+        Project[] memory myProjects = new Project[](projectIds.length);
+        for (uint256 i = 0; i < projectIds.length; i++) {
+            myProjects[i] = projects[projectIds[i]];
+        }
+        return myProjects;
+    }
+}
 
 contract ProjectManager is ModuleBase, ProjectStorage, IProjectManager {
+
     function getName() external pure returns (string memory) {
-        return ModuleNames.PROJECT_MANAGER;
+        return ModuleConfig.PROJECT_MANAGER;
     }
 
     //create projet
@@ -20,8 +57,8 @@ contract ProjectManager is ModuleBase, ProjectStorage, IProjectManager {
         uint64 deadline,
         bool openDonationNow
     ) external {
-        if (goal == ModuleNames.MIN_DONATION) revert InvalidGoal();
-        if (deadline <= block.timestamp + ModuleNames.BUFFER_TIME) revert InvalidDeadline();
+        if (goal == ProjectConfig.MIN_DONATION) revert InvalidGoal();
+        if (deadline <= block.timestamp + ProjectConfig.BUFFER_TIME) revert InvalidDeadline();
         ProjectStatus status = openDonationNow ? ProjectStatus.Fundraising : ProjectStatus.Created;
         uint64 projectId = nextProjectId;
         unchecked {
@@ -33,7 +70,7 @@ contract ProjectManager is ModuleBase, ProjectStorage, IProjectManager {
             description: description,
             goal: goal,
             deadline: deadline,
-            amountRaised: ModuleNames.MIN_DONATION,
+            amountRaised: ProjectConfig.MIN_DONATION,
             status: status
         });
         creatorProjects[msg.sender].push(projectId);
@@ -46,8 +83,8 @@ contract ProjectManager is ModuleBase, ProjectStorage, IProjectManager {
         if (currentMsgSender == project.creator) {
             _;
         } else {
-            bytes memory data = callModuleView(
-                getModuleAddress(ModuleNames.ROLE_ACCESS),
+            bytes memory data = staticCall(
+                getModuleAddress(ModuleConfig.ROLE_ACCESS),
                 'hasPermission(uint64,PermissionType,address)',
                 abi.encode(projectId, permission, currentMsgSender)
             );
@@ -61,9 +98,7 @@ contract ProjectManager is ModuleBase, ProjectStorage, IProjectManager {
         uint64 projectId
     ) external onlyProjectOwner(projectId, PermissionType.UpdateStatus) {
         Project storage project = _getProject(projectId);
-        if (project.status != ProjectStatus.Created) {
-            revert NotInStatus(ProjectStatus.Created, project.status);
-        }
+        project.checkStatus(ProjectStatus.Created);
         project.status = ProjectStatus.Fundraising;
         emit ProjectUpdateStatus(projectId, ProjectStatus.Fundraising);
     }
@@ -72,9 +107,7 @@ contract ProjectManager is ModuleBase, ProjectStorage, IProjectManager {
         uint64 projectId
     ) external onlyProjectOwner(projectId, PermissionType.UpdateStatus) {
         Project storage project = _getProject(projectId);
-        if (project.status != ProjectStatus.Fundraising) {
-            revert NotInStatus(ProjectStatus.Fundraising, project.status);
-        }
+        project.checkStatus(ProjectStatus.Fundraising);
         project.status = ProjectStatus.Created;
         emit ProjectUpdateStatus(projectId, ProjectStatus.Created);
     }
@@ -91,7 +124,7 @@ contract ProjectManager is ModuleBase, ProjectStorage, IProjectManager {
             uint96 goal = project.goal;
             uint96 amountRaised = project.amountRaised;
             uint64 deadline = project.deadline;
-            if (nowTimestamp + ModuleNames.BUFFER_TIME > deadline) {
+            if (nowTimestamp + ProjectConfig.BUFFER_TIME > deadline) {
                 if (amountRaised < goal) {
                     newStatus = ProjectStatus.Failed;
                 } else {
@@ -100,7 +133,7 @@ contract ProjectManager is ModuleBase, ProjectStorage, IProjectManager {
             }
         } else if (
             oldStatus == ProjectStatus.Successful &&
-            project.amountRaised == ModuleNames.MIN_DONATION
+            project.amountRaised == ProjectConfig.MIN_DONATION
         ) {
             newStatus = ProjectStatus.Ended;
         }
@@ -114,10 +147,7 @@ contract ProjectManager is ModuleBase, ProjectStorage, IProjectManager {
         uint64 projectId
     ) external onlyProjectOwner(projectId, PermissionType.Cancel) {
         Project storage project = _getProject(projectId);
-        ProjectStatus oldStatus = project.status;
-        if (oldStatus != ProjectStatus.Created && oldStatus != ProjectStatus.Fundraising) {
-            revert NotInStatus(ProjectStatus.Created, oldStatus);
-        }
+        project.checkStatus1(ProjectStatus.Created, ProjectStatus.Fundraising);
         project.status = ProjectStatus.Cancelled;
         emit ProjectUpdateStatus(projectId, ProjectStatus.Cancelled);
     }
@@ -126,13 +156,11 @@ contract ProjectManager is ModuleBase, ProjectStorage, IProjectManager {
         uint64 projectId,
         uint96 msgValue,
         uint64 timestamp
-    ) external onlyAuthorizedContract(ModuleNames.FUND_MANAGER) {
-        if (msgValue == ModuleNames.MIN_DONATION) revert DonationTooSmall();
+    ) external onlyAuthorizedContract(ModuleConfig.FUND_MANAGER) {
+        if (msgValue == ProjectConfig.MIN_DONATION) revert DonationTooSmall();
         Project storage project = _getProject(projectId);
-        if (project.status != ProjectStatus.Fundraising) {
-            revert NotInStatus(ProjectStatus.Fundraising, project.status);
-        }
-        if (timestamp + ModuleNames.BUFFER_TIME > project.deadline) {
+        project.checkStatus(ProjectStatus.Fundraising);
+        if (timestamp + ProjectConfig.BUFFER_TIME > project.deadline) {
             updateProjectStatus(projectId);
             revert ProjectDeadlinePassed();
         }
@@ -147,9 +175,9 @@ contract ProjectManager is ModuleBase, ProjectStorage, IProjectManager {
 
     function claimFunds(
         uint64 projectId
-    ) external onlyAuthorizedContract(ModuleNames.FUND_MANAGER) {
+    ) external onlyAuthorizedContract(ModuleConfig.FUND_MANAGER) {
         Project storage project = _getProject(projectId);
-        project.amountRaised = ModuleNames.MIN_DONATION;
+        project.amountRaised = ProjectConfig.MIN_DONATION;
         updateProjectStatus(projectId);
         emit ProjectUpdateStatus(projectId, project.status);
     }
@@ -157,21 +185,10 @@ contract ProjectManager is ModuleBase, ProjectStorage, IProjectManager {
     function refund(
         uint64 projectId,
         uint96 amount
-    ) external onlyAuthorizedContract(ModuleNames.FUND_MANAGER) {
+    ) external onlyAuthorizedContract(ModuleConfig.FUND_MANAGER) {
         Project storage project = _getProject(projectId);
         unchecked {
             project.amountRaised -= amount;
         }
-    }
-
-    /**
-     * get project struct by projectId
-     */
-    function _getProject(uint64 projectId) internal view returns (Project storage) {
-        Project storage project = projects[projectId];
-        if (project.status == ProjectStatus.Uninitialized) {
-            revert ProjectNotFound();
-        }
-        return project;
     }
 }

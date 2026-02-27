@@ -5,19 +5,19 @@ pragma solidity ^0.8.28;
 import './ModuleBase.sol';
 import { PermissionType, Project } from './ProjectEnum.sol';
 import './interfaces/IRoleAccess.sol';
-import { IProjectManagerError } from './interfaces/IError.sol';
+import './interfaces/IProjectManager.sol';
 
-contract RoleAccess is ModuleBase, IRoleAccess, IProjectManagerError {
+contract RoleAccess is ModuleBase, IRoleAccess {
     mapping(uint64 => mapping(PermissionType => mapping(address => bool))) private _permissions;
 
     function getName() external pure returns (string memory) {
-        return ModuleNames.ROLE_ACCESS;
+        return ModuleConfig.ROLE_ACCESS;
     }
 
     modifier onlyProjectCreator(uint64 projectId) {
-        bytes memory data = callModuleView(
-            getModuleAddress(ModuleNames.PROJECT_MANAGER),
-            'getProjectDetail(uint64)',
+        bytes memory data = staticCall(
+            getModuleAddress(ModuleConfig.PROJECT_MANAGER),
+            'getProject(uint64)',
             abi.encode(projectId)
         );
         Project memory project = abi.decode(data, (Project));

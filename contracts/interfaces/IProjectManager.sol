@@ -11,4 +11,18 @@ interface IProjectManager {
     );
 
     event ProjectUpdateStatus(uint64 indexed projectId, ProjectStatus status);
+
+    error InvalidGoal();
+
+    error InvalidDeadline();
+
+    error NotProjectOwner();
+
+    error NotInStatus(ProjectStatus expected, ProjectStatus actual);
+
+    error ProjectNotFound();
+
+    error ProjectDeadlinePassed();
+
+    error DonationTooSmall();
 }
